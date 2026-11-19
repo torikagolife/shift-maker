@@ -9,7 +9,7 @@
 
   // 予定・特別日・設定ファイル・結果の保存先
   "d1_databases": [
-    { "binding": "DB", "database_name": "shift-maker", "database_id": "ここにD1のIDを貼る" }
+    { "binding": "DB", "database_name": "shift-maker", "database_id": "63ed3b1d-8ed9-4707-916a-f2bee9d6541a" }
   ],
   "observability": { "enabled": true }
 }
