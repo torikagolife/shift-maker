@@ -78,6 +78,10 @@
   table.gview td.c { min-width:92px; max-width:92px; width:92px; text-align:left; padding:0 3px; cursor:default; }
   table.gview tr.gh td { background:var(--head) !important; color:#fff; font-weight:bold; text-align:center; }
   table.gview tr.gh td.nm { text-align:left; }
+  table.grid td.nm.bad { background:#ffd6d6; color:#b00; font-weight:bold; }
+  table.grid thead th.bad { background:#ff9f9f !important; color:#800; font-weight:bold; }
+  table.grid td.sum.bad, table.grid tfoot td.bad { background:#ff9f9f !important; color:#800; font-weight:bold; }
+  #resultGrid td.c { cursor:crosshair; }
   .help code { background:#eef1f5; padding:0 4px; border-radius:3px; }
 </style>
 </head>
@@ -156,6 +160,15 @@
       <div class="subtabs" id="viewTabs" style="display:none">
         <button data-view="person" class="on">個人別</button>
         <button data-view="group">グループ別（誰がどこに入っているか）</button>
+      </div>
+      <div id="fixBar" style="display:none">
+        <div class="toolbar">
+          <div class="grp" id="fixPens"><span>修正</span></div>
+          <div class="grp"><button id="fixUndo" title="Ctrl+Z">↶ 元に戻す</button></div>
+          <span id="fixMsg" class="muted"></span>
+        </div>
+        <p class="help" style="margin:0">ペンを選んで表のマスをクリック／ドラッグで修正できます（保存は自動）。
+          ルール違反のマスは<b style="color:#e00">赤枠</b>、人数が合わない日は日付と下の人数の行が<b style="color:#c00">赤</b>、公休数などその人の違反は<b style="color:#c00">氏名が赤</b>になります（マウスを乗せると理由）。</p>
       </div>
     </div>
     <div class="gridwrap" id="resultWrap" style="display:none"><table class="grid" id="resultGrid"></table></div>
@@ -287,7 +300,8 @@ async function load() {
   $('#toolbar').style.display = S.info ? 'flex' : 'none';
   $('#dept').textContent = S.info?.basic?.['部署名'] || '';
   $('#holN').value = S.holN ?? ''; $('#holN').placeholder = S.info?.basic?.['既定公休数'] ?? '';
-  buildPens(); renderPlan(); renderSpecial(); renderResult(); renderSettings(d.settingsUpdated);
+  FIX.undo = []; $('#fixMsg').textContent = '';
+  buildPens(); buildFixPens(); renderPlan(); renderSpecial(); renderResult(); renderSettings(d.settingsUpdated);
 }
 
 // ------------------------------------------------ 希望・予定
@@ -452,29 +466,109 @@ function renderResult() {
   $('#dlResult').style.display = r ? 'inline' : 'none';
   $('#clearResult').style.display = r ? 'inline-block' : 'none';
   $('#dlResult').href = '/api/result?month=' + S.month;
-  if (!r) { $('#solveSummary').innerHTML = '<p class="muted">まだこの月は自動作成していません。</p>'; $('#resultWrap').style.display = 'none'; $('#groupWrap').style.display = 'none'; $('#viewTabs').style.display = 'none'; return; }
-  $('#solveSummary').innerHTML = `<p>${esc(r.created)} 作成 ／ ${esc(r.status)} ／ 公休数 ${r.holidays_n ?? '-'} ／ 残った違反 <b>${r.violations.length}件</b></p>` +
+  if (!r) { $('#solveSummary').innerHTML = '<p class="muted">まだこの月は自動作成していません。</p>'; $('#resultWrap').style.display = 'none'; $('#groupWrap').style.display = 'none'; $('#viewTabs').style.display = 'none'; $('#fixBar').style.display = 'none'; return; }
+  $('#solveSummary').innerHTML = `<p>${esc(r.created)} ${r.edited ? '<b>手直し保存</b>' : '作成'} ／ ${esc(r.status)} ／ 公休数 ${r.holidays_n ?? '-'} ／ 残った違反 <b style="color:${r.violations.length ? '#c00' : '#2e7d32'}">${r.violations.length}件</b></p>` +
     (r.notes?.length ? '<p class="err">' + r.notes.map(esc).join('<br>') + '</p>' : '') + vioTable(r.violations);
-  const ds = days(S.month); const vio = new Set(r.violations.filter(v => v.staff && v.date).map(v => v.staff + '|' + v.date));
+  const ds = days(S.month);
+  // 違反の場所: マス（職員×日）／その人（日付なし）／日ごとの人数（対象×日）
+  const vio = new Map(), staffBad = new Map(), dayBad = new Map();
+  for (const v of r.violations) {
+    if (v.staff && v.date) vio.set(v.staff + '|' + v.date, [...(vio.get(v.staff + '|' + v.date) || []), v.msg]);
+    else if (v.staff) staffBad.set(v.staff, [...(staffBad.get(v.staff) || []), v.msg]);
+    else if (v.target && v.date) dayBad.set(v.target + '|' + v.date, v.msg);
+  }
   const tagCols = ['公休', '遅番', '当番D', '出勤'].filter(t => S.info?.tags.includes(t));
-  let h = '<thead><tr><th class="nm">氏名</th>' + ds.map(d => `<th class="${dayClass(d)}">${d.day}<br>${WEEK[d.wd]}</th>`).join('') + tagCols.map(t => `<th class="sum">${esc(t)}</th>`).join('') + '</tr></thead><tbody>';
-  const perDay = {};
+  const dayMsg = d => [...dayBad].filter(([k]) => k.endsWith('|' + d.iso)).map(([, m]) => m);
+  let h = '<thead><tr><th class="nm">氏名</th>' + ds.map(d => { const m = dayMsg(d);
+    return `<th class="${dayClass(d)} ${m.length ? 'bad' : ''}" title="${esc(m.join('\n'))}">${d.day}<br>${WEEK[d.wd]}</th>`; }).join('') + tagCols.map(t => `<th class="sum">${esc(t)}</th>`).join('') + '</tr></thead><tbody>';
   for (const s of S.info?.staff || []) {
     const row = r.table[s.key]; if (!row) continue;
-    h += `<tr><td class="nm">${esc(s.no)} ${esc(s.name)}</td>`;
-    row.forEach((v, i) => { const c = codeInfo(v); const d = ds[i];
-      if (c) for (const t of c.tags) { perDay[t] = perDay[t] || {}; perDay[t][i] = (perDay[t][i] || 0) + 1; }
-      h += `<td class="c ${dayClass(d)} ${vio.has(s.name + '|' + d.iso) ? 'vio' : ''}" style="${c?.color ? 'background:#' + c.color : ''}" title="${esc(v)}">${esc(v ?? '')}</td>`; });
-    h += tagCols.map(t => `<td class="sum">${row.filter(v => codeInfo(v)?.tags.includes(t)).length}</td>`).join('') + '</tr>';
+    const sb = staffBad.get(s.name);
+    h += `<tr data-key="${esc(s.key)}"><td class="nm ${sb ? 'bad' : ''}" title="${esc((sb || []).join('\n'))}">${esc(s.no)} ${esc(s.name)}</td>`;
+    row.forEach((v, i) => { const c = codeInfo(v); const d = ds[i]; const vm = vio.get(s.name + '|' + d.iso);
+      h += `<td class="c ${dayClass(d)} ${vm ? 'vio' : ''}" data-i="${i}" style="${c?.color ? 'background:#' + c.color : ''}" title="${esc(v ?? '')}${vm ? '\n' + esc(vm.join('\n')) : ''}">${esc(v ?? '')}</td>`; });
+    h += tagCols.map(t => `<td class="sum ${t === '公休' && sb?.some(m => m.startsWith('公休')) ? 'bad' : ''}">${row.filter(v => codeInfo(v)?.tags.includes(t)).length}</td>`).join('') + '</tr>';
   }
-  const footTags = ['出勤', '遅番', '当番D'].filter(t => perDay[t]);
-  h += '</tbody><tfoot>' + footTags.map((t, k) => { const st = `style="bottom:${(footTags.length - 1 - k) * 25}px"`;
-    return `<tr><td class="nm" ${st}>${esc(t)}（人）</td>` + ds.map((d, i) => `<td ${st}>${perDay[t][i] || 0}</td>`).join('') + tagCols.map(() => `<td ${st}></td>`).join('') + '</tr>'; }).join('') + '</tfoot>';
+  const footTags = (r.targets && r.targets.length ? r.targets : ['出勤', '遅番', '当番D']).filter(t => codesOf(t).length);
+  h += '</tbody><tfoot>' + footTags.map((t, k) => { const st = `style="bottom:${(footTags.length - 1 - k) * 25}px"`; const cs = new Set(codesOf(t).map(c => c.code));
+    return `<tr><td class="nm" ${st}>${esc(t)}（人）</td>` + ds.map((d, i) => {
+      const n = (S.info?.staff || []).filter(s => cs.has(norm(r.table[s.key]?.[i] || ''))).length; const bad = dayBad.get(t + '|' + d.iso);
+      return `<td ${st} class="${bad ? 'bad' : ''}" title="${esc(bad || '')}">${n}</td>`; }).join('') + tagCols.map(() => `<td ${st}></td>`).join('') + '</tr>'; }).join('') + '</tfoot>';
+  const w = $('#resultWrap'), y = w.scrollTop, x = w.scrollLeft;
   $('#resultGrid').innerHTML = h;
+  w.scrollTop = y; w.scrollLeft = x;
   renderGroupView(r, ds);
   $('#viewTabs').style.display = 'flex';
   showView(S.view || 'person');
 }
+
+// ------------------------------------------------ 自動作成の結果を手直し
+const FIX = { pen:null, undo:[], timer:null, busy:false, again:false };
+function buildFixPens() {
+  const box = $('#fixPens'); box.querySelectorAll('button').forEach(b => b.remove());
+  if (!S.info) return;
+  const codes = [...S.info.codes].sort((a, b) => (a.kind === '勤務') - (b.kind === '勤務'));
+  for (const c of codes) {
+    const b = document.createElement('button'); b.className = 'pen'; b.dataset.fix = c.code; b.textContent = c.code; b.title = c.name;
+    if (c.color) b.style.background = '#' + c.color;
+    box.appendChild(b);
+  }
+  if (!FIX.pen || !codes.some(c => c.code === FIX.pen)) FIX.pen = codes.find(c => c.kind === '勤務')?.code || codes[0]?.code;
+  setFixPen(FIX.pen);
+}
+function setFixPen(p) { FIX.pen = p; document.querySelectorAll('#fixPens .pen').forEach(b => b.classList.toggle('on', b.dataset.fix === p)); }
+$('#fixPens').addEventListener('click', e => { const b = e.target.closest('[data-fix]'); if (b) setFixPen(b.dataset.fix); });
+let fixStroke = null;
+function fixApply(td) {
+  if (!fixStroke || fixStroke.done.has(td)) return;
+  fixStroke.done.add(td);
+  const key = td.parentElement.dataset.key, i = Number(td.dataset.i), row = S.result.table[key];
+  if (!row || row[i] === FIX.pen) return;
+  fixStroke.changes.push({ key, i, before: row[i], after: FIX.pen });
+  row[i] = FIX.pen;
+  const c = codeInfo(FIX.pen); td.textContent = FIX.pen; td.style.background = c?.color ? '#' + c.color : ''; td.classList.remove('vio');
+}
+$('#resultGrid').addEventListener('pointerdown', e => {
+  const td = e.target.closest('td.c'); if (!td || e.button > 0 || !FIX.pen) return;
+  e.preventDefault(); fixStroke = { done:new Set(), changes:[] }; fixApply(td);
+});
+window.addEventListener('pointermove', e => { if (!fixStroke) return; const el = document.elementFromPoint(e.clientX, e.clientY); if (el && el.matches?.('#resultGrid td.c')) fixApply(el); });
+window.addEventListener('pointerup', () => {
+  if (!fixStroke) return;
+  if (fixStroke.changes.length) { FIX.undo.push(fixStroke.changes); fixChanged(); }
+  fixStroke = null;
+});
+function fixUndo() {
+  const ch = FIX.undo.pop(); if (!ch) return;
+  for (const c of ch.reverse()) S.result.table[c.key][c.i] = c.before;
+  fixChanged();
+}
+$('#fixUndo').onclick = fixUndo;
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'z' && $('#tab-solve').classList.contains('on') && S.view !== 'group') { e.preventDefault(); fixUndo(); } });
+function fixChanged() {
+  renderResult();
+  $('#fixMsg').innerHTML = '<span class="spinner"></span> 修正を確認中…';
+  clearTimeout(FIX.timer); FIX.timer = setTimeout(fixRecheck, 500);
+}
+async function fixRecheck() {
+  if (FIX.busy) { FIX.again = true; return; }
+  FIX.busy = true; FIX.again = false;
+  const month = S.month;
+  try {
+    const { b64 } = await api('/api/settings?raw=1');
+    const r = S.result;
+    const res = await Engine.call('recheck', JSON.stringify({ settings:b64, month, holidays_n:S.holN, status:r.status,
+      specials:S.specials.map(x => ({ date:x.date, target:x.target, min:x.min, max:x.max, note:x.note })), table:r.table }));
+    if (month !== S.month || S.result !== r) return;
+    r.violations = res.violations; r.targets = res.targets; r.holidays_n = res.holidays_n; r.edited = true;
+    const { created, ...summary } = r;
+    const saved = await api('/api/result', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ month, summary, xlsx:res.xlsx }) });
+    r.created = saved.created;
+    if (!FIX.again) { renderResult(); $('#fixMsg').textContent = `保存しました（違反 ${r.violations.length}件）`; }
+  } catch (e) { $('#fixMsg').textContent = '保存できませんでした'; toast('修正の確認・保存に失敗: ' + e.message, true); }
+  finally { FIX.busy = false; if (FIX.again) fixRecheck(); }
+}
+
 $('#solveBtn').onclick = async () => {
   await flush();
   const btn = $('#solveBtn'); btn.disabled = true; const t0 = Date.now();
@@ -487,6 +581,7 @@ $('#solveBtn').onclick = async () => {
     const { xlsx, ...summary } = await Engine.call('solve', JSON.stringify(req));
     const saved = await api('/api/result', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ month:S.month, summary, xlsx }) });
     S.result = { ...summary, created:saved.created };
+    FIX.undo = [];
     renderResult(); $('#solveMsg').textContent = `完了（${Math.round((Date.now() - t0) / 1000)}秒）`;
   } catch (e) { $('#solveMsg').textContent = ''; toast('自動作成に失敗: ' + e.message, true); }
   finally { clearInterval(tick); btn.disabled = false; }
@@ -521,6 +616,7 @@ function showView(v) {
   document.querySelectorAll('#viewTabs button').forEach(b => b.classList.toggle('on', b.dataset.view === v));
   $('#resultWrap').style.display = v === 'person' ? 'block' : 'none';
   $('#groupWrap').style.display = v === 'group' ? 'block' : 'none';
+  $('#fixBar').style.display = S.result && v === 'person' ? 'block' : 'none';
 }
 $('#viewTabs').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) showView(b.dataset.view); });
 
