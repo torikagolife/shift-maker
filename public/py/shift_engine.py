@@ -91,12 +91,21 @@ class Config:
             kind = norm(r.get('種別')) or '勤務'
             tags = set(split_list(r.get('タグ')))
             tags.add(kind)
+            # 勤務グループ（診察室・受付など）。グループ名はタグにもなるので必要人数やルールで使える
+            grp = norm(r.get('勤務グループ'))
+            if grp:
+                tags.add(grp)
+            else:
+                grp = '休み' if kind in ('休み', '休暇') else '未分類'
             self.codes[c] = dict(
-                code=c, name=r.get('名称') or c, kind=kind, tags=tags,
+                code=c, name=r.get('名称') or c, kind=kind, tags=tags, group=grp,
                 start=r.get('開始'), end=r.get('終了'),
                 auto=flag(r.get('自動配置'), True),
                 color=norm(r.get('背景色')).lstrip('#') or None)
         self.all_tags = set().union(*[v['tags'] for v in self.codes.values()]) if self.codes else set()
+        # グループの並び順は勤務種類シートに出てくる順（休み・未分類は最後）
+        g = list(dict.fromkeys(v['group'] for v in self.codes.values()))
+        self.groups = [x for x in g if x not in ('未分類', '休み')] + [x for x in ('未分類', '休み') if x in g]
 
         # 職員
         self.staff = []
@@ -564,6 +573,8 @@ def write_result(cfg, path, month, dates, table, staff_list, req_by_day, hol_n, 
             ws.cell(r, c0 + j, sum(1 for i in range(nd) if norm(table.get((s['key'], i)) or '') in cs)).alignment = Alignment(horizontal='center')
     ws.freeze_panes = 'C6'
 
+    write_group_sheet(cfg, wb, month, dates, table, staff_list, title)
+
     # チェック結果
     ck = wb.create_sheet('チェック')
     ck['A1'] = title; ck['A1'].font = Font(bold=True, size=13)
@@ -593,6 +604,62 @@ def write_result(cfg, path, month, dates, table, staff_list, req_by_day, hol_n, 
         sp.cell(sp.max_row, 1).number_format = 'yyyy/mm/dd'
     sp.column_dimensions['A'].width = 12
     wb.save(path)
+
+
+def write_group_sheet(cfg, wb, month, dates, table, staff_list, title):
+    """グループ別の勤務表: 日付ごとに、各グループに誰が入っているか"""
+    ws = wb.create_sheet('グループ別', 1)
+    nd = len(dates)
+    ws['A1'] = title.replace('勤務表', '勤務表（グループ別）', 1) if '勤務表' in title else title
+    ws['A1'].font = Font(bold=True, size=13)
+    ws.column_dimensions['A'].width = 12
+    for i, d in enumerate(dates):
+        col = 2 + i
+        ws.cell(3, col, i + 1); ws.cell(4, col, WEEK[d.weekday()])
+        for r in (3, 4):
+            c = ws.cell(r, col); c.alignment = Alignment(horizontal='center'); c.border = BOX
+            if d.weekday() >= 5 or d in cfg.holidays:
+                c.fill = GRAY
+        ws.column_dimensions[get_column_letter(col)].width = 11
+    ws.cell(3, 1, '日'); ws.cell(4, 1, '曜日')
+    # 日ごと・グループごとの [(職員, コード)]
+    cell_of = {}
+    for s in staff_list:
+        for i in range(nd):
+            c = norm(table.get((s['key'], i)) or '')
+            info = cfg.codes.get(c)
+            g = info['group'] if info else ('未登録' if c else None)
+            if g:
+                cell_of.setdefault((g, i), []).append((s, c))
+    groups = cfg.groups + (['未登録'] if any(k[0] == '未登録' for k in cell_of) else [])
+    HEAD = PatternFill('solid', fgColor='2F5D8A')
+    r = 5
+    for g in groups:
+        n = max([len(cell_of.get((g, i), [])) for i in range(nd)] or [0])
+        if n == 0:
+            continue
+        ws.cell(r, 1, g).font = Font(bold=True, color='FFFFFF')
+        ws.cell(r, 1).fill = HEAD
+        for i in range(nd):
+            c = ws.cell(r, 2 + i, len(cell_of.get((g, i), [])))
+            c.font = Font(bold=True, color='FFFFFF'); c.fill = HEAD; c.alignment = Alignment(horizontal='center')
+        for k in range(n):
+            rr = r + 1 + k
+            ws.cell(rr, 1).border = BOX
+            for i in range(nd):
+                lst = cell_of.get((g, i), [])
+                c = ws.cell(rr, 2 + i)
+                c.border = BOX
+                c.alignment = Alignment(horizontal='left', shrink_to_fit=True)
+                if k < len(lst):
+                    s, code = lst[k]
+                    c.value = f'{s["name"].replace(chr(12288), "").replace(" ", "")} {code}'
+                    info = cfg.codes.get(code)
+                    if info and info['color']:
+                        c.fill = PatternFill('solid', fgColor=info['color'])
+        r += n + 2
+    ws.freeze_panes = 'B5'
+    ws.page_setup.orientation = 'landscape'
 
 
 # ------------------------------------------------------------ コマンド
