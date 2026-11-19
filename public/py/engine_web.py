@@ -11,7 +11,22 @@ def _cfg(b64):
 
 def _vjson(V):
     return [dict(kind=v['kind'], date=v['date'].isoformat() if v['date'] else None,
-                 staff=v['staff'], msg=v['msg']) for v in V]
+                 staff=v['staff'], msg=v['msg'], target=v.get('target')) for v in V]
+
+
+def _specials(lst):
+    out = []
+    for x in lst or []:
+        d = E.to_date(x.get('date'))
+        if d and E.norm(x.get('target')):
+            out.append(dict(date=d, target=E.norm(x['target']), min=E.num(x.get('min')),
+                            max=E.num(x.get('max')), note=x.get('note') or ''))
+    return out
+
+
+def _targets(req_by_day):
+    """その月に必要人数が決まっている対象（日別の人数を表示する行）"""
+    return list(dict.fromkeys(t for lst in req_by_day.values() for (t, *_) in lst))
 
 
 def _out(fn):
@@ -52,17 +67,13 @@ def solve(req_json):
         d = int(c['day'])
         if c['key'] in keys and 1 <= d <= nd and str(c.get('value') or '').strip():
             cells[(c['key'], d - 1)] = str(c['value']).strip()
-    specials = []
-    for x in req.get('specials', []):
-        d = E.to_date(x.get('date'))
-        if d and E.norm(x.get('target')):
-            specials.append(dict(date=d, target=E.norm(x['target']), min=E.num(x.get('min')),
-                                 max=E.num(x.get('max')), note=x.get('note') or ''))
+    specials = _specials(req.get('specials'))
     buf = io.BytesIO()
     r = E.run_solve(cfg, month, cells, E.num(req.get('holidays_n')), specials,
                     E.num(req.get('seconds')), buf, log=lambda *a: None)
     return dict(
         status=r['status'], notes=r['notes'], violations=_vjson(r['violations']), holidays_n=r['hol_n'],
+        targets=_targets(E.day_requirements(cfg, r['dates'], specials)),
         table={s['key']: [r['table'].get((s['key'], i)) for i in range(nd)] for s in r['staff']},
         xlsx=base64.b64encode(buf.getvalue()).decode())
 
@@ -202,3 +213,33 @@ def save_sheets(settings_b64, data_json):
     wb.save(buf)
     b64 = base64.b64encode(buf.getvalue()).decode()
     return dict(b64=b64, info=json.loads(info(b64)))
+
+
+@_out
+def recheck(req_json):
+    """画面で手直しした勤務表をチェックし直し、Excel も作り直す"""
+    req = json.loads(req_json)
+    cfg = _cfg(req['settings'])
+    month = E.to_date(req['month'])
+    dates = E.month_dates(month)
+    nd = len(dates)
+    tbl = req.get('table') or {}
+    staff = [s for s in cfg.staff if s['key'] in tbl]
+    table = {}
+    for s in staff:
+        row = tbl[s['key']]
+        for i in range(nd):
+            v = str(row[i]).strip() if i < len(row) and row[i] not in (None, '') else ''
+            if v:
+                table[(s['key'], i)] = v
+    hol_n = E.num(req.get('holidays_n'))
+    if hol_n is None:
+        hol_n = E.num(cfg.basic.get(E.norm('既定公休数')))
+    specials = _specials(req.get('specials'))
+    rq = E.day_requirements(cfg, dates, specials)
+    V = E.evaluate(cfg, dates, table, rq, hol_n, staff)
+    buf = io.BytesIO()
+    E.write_result(cfg, buf, month, dates, table, staff, rq, hol_n, V,
+                   f'{month:%Y年%m月} 勤務表（自動作成・手直しあり）', req.get('status') or '', list(dict.fromkeys(cfg.errors)), specials)
+    return dict(violations=_vjson(V), targets=_targets(rq), holidays_n=hol_n,
+                xlsx=base64.b64encode(buf.getvalue()).decode())

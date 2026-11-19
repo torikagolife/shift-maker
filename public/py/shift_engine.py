@@ -313,8 +313,8 @@ def holidays_for(cfg, s, default_n):
 def evaluate(cfg, dates, table, req_by_day, hol_n, staff_list):
     """table: {(職員key, 日index): コード}。違反の一覧を返す"""
     V = []
-    def add(kind, i, s, msg):
-        V.append(dict(kind=kind, date=dates[i] if i is not None else None, staff=s['name'] if s else '', msg=msg))
+    def add(kind, i, s, msg, target=None):
+        V.append(dict(kind=kind, date=dates[i] if i is not None else None, staff=s['name'] if s else '', msg=msg, target=target))
     nd = len(dates)
     has = lambda s, i, cs: table.get((s['key'], i)) in cs
 
@@ -337,9 +337,9 @@ def evaluate(cfg, dates, table, req_by_day, hol_n, staff_list):
         for (tname, cs, mn, mx, note) in req_by_day[i]:
             cnt = sum(1 for s in staff_list if norm(table.get((s['key'], i)) or '') in cs)
             if mn is not None and cnt < mn:
-                add('人数不足', i, None, f'{tname} {cnt}人（最小 {mn}人）{note}')
+                add('人数不足', i, None, f'{tname} {cnt}人（最小 {mn}人）{note}', tname)
             if mx is not None and cnt > mx:
-                add('人数超過', i, None, f'{tname} {cnt}人（最大 {mx}人）{note}')
+                add('人数超過', i, None, f'{tname} {cnt}人（最大 {mx}人）{note}', tname)
 
     T = {k: norm(v) for k, v in table.items()}
     for r in cfg.rules:
