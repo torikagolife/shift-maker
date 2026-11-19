@@ -132,6 +132,11 @@ async function api(req, env, url) {
     await putFile(env, 'result:' + mo, xlsx, summary);
     return json({ ok: true, created: now() });
   }
+  if (p === '/api/result' && m === 'DELETE') {
+    if (!MONTH_RE.test(month || '')) return fail('month が必要です');
+    await env.DB.prepare('DELETE FROM files WHERE name = ?').bind('result:' + month).run();
+    return json({ ok: true });
+  }
   if (p === '/api/result' && m === 'GET') {
     const f = await getFile(env, 'result:' + month);
     if (!f) return fail('まだ自動作成していません', 404);
