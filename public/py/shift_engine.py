@@ -242,6 +242,8 @@ def read_schedule(ws, cfg):
         key = norm(ws.cell(r, name_col).value)
         if not key:
             continue
+        if key.startswith('▼'):      # 自動作成で出力した表の「▼日別の人数」から下は集計なので読まない
+            break
         s = cfg.staff_by_key.get(key)
         if not s:
             unknown_staff.append(str(ws.cell(r, name_col).value))
