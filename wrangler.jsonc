@@ -1,0 +1,15 @@
+{
+  // シフト作成 Web（無料プランで動く版）
+  "name": "shift-maker",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+
+  // 画面と計算エンジンのファイル。パスワード確認のため Worker を先に通す
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
+
+  // 予定・特別日・設定ファイル・結果の保存先
+  "d1_databases": [
+    { "binding": "DB", "database_name": "shift-maker", "database_id": "ここにD1のIDを貼る" }
+  ],
+  "observability": { "enabled": true }
+}

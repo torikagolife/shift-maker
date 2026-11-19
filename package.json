@@ -1,0 +1,12 @@
+{
+  "name": "shift-maker",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "private": true,
+  "devDependencies": {
+    "wrangler": "^4.165.0"
+  }
+}

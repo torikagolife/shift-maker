@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>シフト作成</title>
+<style>
+  :root { --line:#d5d9de; --head:#2f5d8a; --weekend:#eef1f5; --hol:#fde8e8; --bad:#ff8f8f; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Meiryo UI","Hiragino Sans",sans-serif; font-size:13px; color:#222; background:#f7f8fa; }
+  header { display:flex; align-items:center; gap:12px; padding:8px 14px; background:var(--head); color:#fff; position:sticky; top:0; z-index:20; }
+  header h1 { font-size:16px; margin:0 8px 0 0; }
+  header .month { display:flex; align-items:center; gap:4px; }
+  header .month b { font-size:16px; min-width:92px; text-align:center; }
+  header button { background:#fff2; color:#fff; border:1px solid #fff6; }
+  nav { display:flex; gap:2px; margin-left:12px; }
+  nav button { border-radius:6px 6px 0 0; }
+  nav button.on { background:#fff; color:var(--head); font-weight:bold; }
+  #saved { margin-left:auto; font-size:12px; opacity:.9; }
+  button { font:inherit; padding:4px 10px; border:1px solid #b9c0c8; background:#fff; border-radius:5px; cursor:pointer; }
+  button:hover { filter:brightness(.95); }
+  button.primary { background:var(--head); color:#fff; border-color:var(--head); }
+  button:disabled { opacity:.5; cursor:default; }
+  input, select { font:inherit; padding:3px 6px; border:1px solid #b9c0c8; border-radius:4px; }
+  main { padding:12px 14px; }
+  .tab { display:none; }
+  .tab.on { display:block; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .muted { color:#667; font-size:12px; }
+  .err { color:#c00; }
+  .toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-bottom:8px; }
+  .toolbar .grp { display:flex; flex-wrap:wrap; gap:4px; align-items:center; padding:4px 6px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+  .toolbar .grp > span { font-size:11px; color:#667; margin-right:2px; }
+  .pen { min-width:36px; padding:3px 6px; }
+  .pen.on { outline:3px solid #ff9800; outline-offset:1px; font-weight:bold; }
+  .gridwrap { overflow:auto; max-height:calc(100vh - 190px); border:1px solid var(--line); background:#fff; border-radius:6px; }
+  table.grid { border-collapse:separate; border-spacing:0; user-select:none; touch-action:none; }
+  table.grid th, table.grid td { border-right:1px solid var(--line); border-bottom:1px solid var(--line); text-align:center; padding:0; height:24px; }
+  table.grid thead th { position:sticky; top:0; background:#f2f4f7; z-index:3; font-weight:normal; font-size:11px; line-height:1.15; padding:2px 0; }
+  table.grid thead tr:nth-child(2) th { top:31px; }
+  table.grid .nm { position:sticky; left:0; background:#fff; z-index:2; text-align:left; padding:0 6px; white-space:nowrap; min-width:118px; max-width:150px; overflow:hidden; text-overflow:ellipsis; }
+  table.grid .no { position:sticky; left:0; }
+  table.grid thead .nm { z-index:4; background:#f2f4f7; }
+  table.grid td.c { min-width:36px; max-width:36px; width:36px; font-size:11px; cursor:crosshair; overflow:hidden; white-space:nowrap; }
+  table.grid .we { background:var(--weekend); }
+  table.grid .ho { background:var(--hol); }
+  table.grid td.wish { background:#fff7cc !important; border:1px dashed #d4a300; }
+  table.grid td.not { color:#777; background:repeating-linear-gradient(45deg,#fff,#fff 4px,#f0f0f0 4px,#f0f0f0 8px) !important; }
+  table.grid td.bad { outline:2px solid #e00; outline-offset:-2px; }
+  table.grid td.vio { box-shadow: inset 0 0 0 2px #e00; }
+  table.grid td.sum, table.grid th.sum { min-width:44px; font-size:11px; background:#fafbfc; }
+  table.grid td.sum.over { background:#ffe0e0; color:#c00; font-weight:bold; }
+  table.grid tfoot td { position:sticky; bottom:0; background:#f2f4f7; font-size:11px; z-index:1; }
+  table.grid tfoot td.nm { z-index:2; background:#f2f4f7; }
+  table.list { border-collapse:collapse; width:100%; }
+  table.list th, table.list td { border-bottom:1px solid var(--line); padding:4px 6px; text-align:left; }
+  table.list th { background:#f2f4f7; font-weight:normal; color:#445; }
+  .swatch { display:inline-block; width:14px; height:14px; border:1px solid #999; vertical-align:middle; border-radius:3px; }
+  .spinner { display:inline-block; width:14px; height:14px; border:2px solid #ccc; border-top-color:var(--head); border-radius:50%; animation:spin 1s linear infinite; vertical-align:middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #toast { position:fixed; right:16px; bottom:16px; background:#333; color:#fff; padding:8px 14px; border-radius:6px; display:none; z-index:50; max-width:60vw; }
+  #toast.err { background:#c62828; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:10px; background:#e8eef5; margin:1px; font-size:12px; }
+  .help { font-size:12px; color:#556; line-height:1.7; }
+  .help code { background:#eef1f5; padding:0 4px; border-radius:3px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>シフト作成 <span id="dept" style="font-weight:normal;font-size:13px"></span></h1>
+  <div class="month">
+    <button id="prev">◀</button><b id="monthLabel"></b><button id="next">▶</button>
+  </div>
+  <nav>
+    <button data-tab="plan" class="on">希望・予定</button>
+    <button data-tab="special">特別日</button>
+    <button data-tab="solve">自動作成</button>
+    <button data-tab="check">チェック</button>
+    <button data-tab="settings">設定</button>
+  </nav>
+  <span id="saved"></span><span id="engineSt" class="muted" style="color:#fff;opacity:.85;font-size:12px"></span>
+</header>
+
+<main>
+  <!-- 希望・予定 -->
+  <section class="tab on" id="tab-plan">
+    <div id="noSettings" class="card" style="display:none">まず「設定」タブで設定ファイル（設定.xlsx）を登録してください。</div>
+    <div class="toolbar" id="toolbar">
+      <div class="grp" id="penFixed"><span>固定</span></div>
+      <div class="grp"><span>希望</span>
+        <button class="pen" data-pen="?休" style="background:#fff7cc">?休</button>
+      </div>
+      <div class="grp"><span>しない</span>
+        <select id="notSel"></select><button class="pen" id="notPen">×</button>
+      </div>
+      <div class="grp"><span>自由</span>
+        <input id="freeIn" size="7" placeholder="A/AS"><button class="pen" id="freePen">ペン</button>
+      </div>
+      <div class="grp"><button class="pen" data-pen="">消しゴム</button></div>
+      <div class="grp"><button id="undo" title="Ctrl+Z">↶ 元に戻す</button></div>
+      <div class="grp"><span>公休数</span><input id="holN" type="number" min="0" max="31" style="width:56px"></div>
+      <div class="grp"><button id="clearPlan">この月をすべて消す</button></div>
+    </div>
+    <div class="gridwrap"><table class="grid" id="planGrid"></table></div>
+    <p class="help">
+      ペンを選んで、マスをクリック／ドラッグで塗ります（同じ値のマスから塗り始めると消しゴムになります）。保存は自動です。<br>
+      <code>休</code><code>有</code>など＝その勤務で固定 ／ <code>?休</code>＝できれば休み ／ <code>×遅番</code>＝その勤務にはしない ／ <code>A/AS</code>＝どちらか ／ 空欄＝おまかせ。
+      右の「休」は固定した公休の数（公休数を超えると赤）、下の行は日ごとの休み希望の人数です。
+    </p>
+  </section>
+
+  <!-- 特別日 -->
+  <section class="tab" id="tab-special">
+    <div class="card">
+      <b>特別日</b> <span class="muted">その日だけ必要人数を変えたいとき（例: 早出の日、レセ日、全体MTの日）。同じ対象の通常の必要人数より優先されます。</span>
+      <div class="toolbar" style="margin-top:10px">
+        <input type="date" id="spDate">
+        <select id="spTarget"></select>
+        最小<input type="number" id="spMin" style="width:60px">
+        最大<input type="number" id="spMax" style="width:60px">
+        <input id="spNote" placeholder="備考" size="16">
+        <button class="primary" id="spAdd">追加</button>
+      </div>
+      <table class="list" id="spList"></table>
+    </div>
+  </section>
+
+  <!-- 自動作成 -->
+  <section class="tab" id="tab-solve">
+    <div class="card">
+      <div class="toolbar">
+        <button class="primary" id="solveBtn">この月の勤務表を自動作成</button>
+        計算時間
+        <select id="solveSec"><option value="30">30秒</option><option value="60" selected>60秒</option><option value="120">120秒</option></select>
+        <span id="solveMsg" class="muted"></span>
+        <a id="dlResult" style="margin-left:auto;display:none"><button>Excelでダウンロード</button></a>
+      </div>
+      <div id="solveSummary"></div>
+    </div>
+    <div class="gridwrap" id="resultWrap" style="display:none"><table class="grid" id="resultGrid"></table></div>
+  </section>
+
+  <!-- チェック -->
+  <section class="tab" id="tab-check">
+    <div class="card">
+      <b>手直しした勤務表・今までの勤務表のチェック</b> <span class="muted">（その月の特別日タブの内容も使います）</span>
+      <div class="toolbar" style="margin-top:10px">
+        <input type="file" id="ckFile" accept=".xlsx,.xlsm">
+        シート名<input id="ckSheet" size="10" placeholder="空欄=先頭">
+        年月<input id="ckMonth" size="8" placeholder="例 2026-11">
+        <button class="primary" id="ckBtn">チェック</button>
+        <span id="ckMsg" class="muted"></span>
+      </div>
+      <p class="muted">自動作成でダウンロードしたExcelを手直ししたものも、今までの手作りの勤務表（日付が1,2,3…と並び、氏名の列がある形）もそのまま読めます。年月はシート名やB1から読めないときだけ入力。</p>
+      <div id="ckResult"></div>
+    </div>
+  </section>
+
+  <!-- 設定 -->
+  <section class="tab" id="tab-settings">
+    <div class="card">
+      <b>設定ファイル</b>
+      <span class="muted">勤務種類・職員・必要人数・ルール・祝日を書いた Excel（設定.xlsx）。変更したら登録し直してください。</span>
+      <div class="toolbar" style="margin-top:10px">
+        <input type="file" id="setFile" accept=".xlsx">
+        <button class="primary" id="setBtn">登録</button>
+        <a href="/api/settings" id="setDl"><button>今の設定をダウンロード</button></a>
+        <span id="setMsg" class="muted"></span>
+      </div>
+      <div id="setInfo"></div>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const WEEK = '日月火水木金土';
+const S = { month:null, info:null, plan:new Map(), specials:[], holN:null, result:null, pen:'休', undo:[], pending:new Map(), timer:null };
+
+// ------------------------------------------------ 共通
+function toast(msg, err) { const t = $('#toast'); t.textContent = msg; t.className = err ? 'err' : ''; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', err ? 7000 : 2500); }
+async function api(path, opt = {}) {
+  const r = await fetch(path, opt);
+  const ct = r.headers.get('Content-Type') || '';
+  const d = ct.includes('json') ? await r.json() : await r.text();
+  if (!r.ok) throw new Error(d.error || d || r.status);
+  return d;
+}
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+const norm = s => String(s ?? '').normalize('NFKC').replace(/\s+/g, '');
+function jstToday() { return new Date(Date.now() + 9 * 3600e3); }
+function shiftMonth(m, d) { let [y, mo] = m.split('-').map(Number); mo += d; while (mo > 12) { mo -= 12; y++; } while (mo < 1) { mo += 12; y--; } return `${y}-${String(mo).padStart(2,'0')}`; }
+function days(m) { const [y, mo] = m.split('-').map(Number); const n = new Date(y, mo, 0).getDate(); return Array.from({ length:n }, (_, i) => { const d = new Date(y, mo - 1, i + 1); return { day:i + 1, iso:`${m}-${String(i + 1).padStart(2,'0')}`, wd:d.getDay() }; }); }
+function dayClass(d) { const hol = S.info?.holidays?.[d.iso]; return hol ? 'ho' : (d.wd === 0 || d.wd === 6 ? 'we' : ''); }
+
+// コード・タグの判定
+function codeInfo(c) { return S.info?.codes.find(x => x.code === norm(c)); }
+function isToken(t) { t = norm(t); return !!S.info && (S.info.codes.some(c => c.code === t) || S.info.tags.includes(t)); }
+function validValue(v) {
+  v = norm(v); if (!v) return true;
+  if (/^[×xX✕?？]/.test(v) && v.length > 1) return isToken(v.slice(1));
+  return v.split(/[\/／]/).every(isToken);
+}
+function codesOf(t) { t = norm(t); if (!S.info) return []; const c = S.info.codes.find(x => x.code === t); return c ? [c] : S.info.codes.filter(x => x.tags.includes(t)); }
+function isRestValue(v) { v = norm(v); if (!v || /^[×xX✕]/.test(v)) return false; if (/^[?？]/.test(v)) v = v.slice(1); const cs = codesOf(v); return cs.length && cs.every(c => c.kind !== '勤務'); }
+function isKokyu(v) { const c = codeInfo(v); return c && c.tags.includes('公休'); }
+
+// ------------------------------------------------ 計算エンジン（ブラウザの中の Python）
+const Engine = (() => {
+  let w = null, seq = 0, state = 'idle', err = '';
+  const waits = new Map();
+  function start() {
+    if (w) return;
+    w = new Worker('/engine-worker.js');
+    w.onmessage = ({ data }) => {
+      if (data.type === 'status') {
+        state = data.msg === 'ready' ? 'ready' : data.msg === 'error' ? 'error' : 'loading';
+        err = data.error || '';
+        $('#engineSt').textContent = state === 'ready' ? '計算エンジン準備OK' : state === 'error' ? '計算エンジンの読み込みに失敗' : data.msg;
+        $('#engineSt').title = err;
+        return;
+      }
+      const p = waits.get(data.id); if (!p) return; waits.delete(data.id);
+      data.ok ? p.resolve(data.result) : p.reject(new Error(data.error));
+    };
+    w.onerror = e => { state = 'error'; $('#engineSt').textContent = '計算エンジンの読み込みに失敗'; for (const p of waits.values()) p.reject(new Error(e.message || 'エンジンのエラー')); waits.clear(); };
+  }
+  function call(fn, ...args) {
+    start();
+    if (state === 'error') return Promise.reject(new Error('計算エンジンが読み込めませんでした: ' + err));
+    return new Promise((resolve, reject) => { const id = ++seq; waits.set(id, { resolve, reject }); w.postMessage({ id, fn, args }); });
+  }
+  return { start, call, get state() { return state; } };
+})();
+async function fileB64(f) {
+  const u = new Uint8Array(await f.arrayBuffer()); let s = '';
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+const waitMsg = () => Engine.state === 'ready' ? '' : '（初回は計算エンジンの読み込みで1分ほどかかることがあります）';
+
+// ------------------------------------------------ 読み込み
+async function load() {
+  $('#monthLabel').textContent = S.month.replace('-', '年') + '月';
+  history.replaceState(null, '', '?month=' + S.month);
+  const d = await api('/api/state?month=' + S.month);
+  S.info = d.info; S.specials = d.specials; S.holN = d.holidays_n; S.result = d.result;
+  S.plan = new Map(d.plan.map(x => [x.key + '|' + x.day, x.value]));
+  S.undo = [];
+  $('#noSettings').style.display = S.info ? 'none' : 'block';
+  $('#toolbar').style.display = S.info ? 'flex' : 'none';
+  $('#dept').textContent = S.info?.basic?.['部署名'] || '';
+  $('#holN').value = S.holN ?? ''; $('#holN').placeholder = S.info?.basic?.['既定公休数'] ?? '';
+  buildPens(); renderPlan(); renderSpecial(); renderResult(); renderSettings(d.settingsUpdated);
+}
+
+// ------------------------------------------------ 希望・予定
+function buildPens() {
+  const box = $('#penFixed'); box.querySelectorAll('button').forEach(b => b.remove());
+  if (!S.info) return;
+  const codes = [...S.info.codes].sort((a, b) => (a.kind === '勤務') - (b.kind === '勤務'));
+  for (const c of codes) {
+    const b = document.createElement('button'); b.className = 'pen'; b.dataset.pen = c.code; b.textContent = c.code; b.title = c.name;
+    if (c.color) b.style.background = '#' + c.color;
+    box.appendChild(b);
+  }
+  $('#notSel').innerHTML = [...S.info.tags.filter(t => !['勤務','休み','休暇'].includes(t)).map(t => `<option>${esc(t)}</option>`),
+    '<option disabled>──</option>', ...S.info.codes.filter(c => c.kind === '勤務').map(c => `<option>${esc(c.code)}</option>`)].join('');
+  if (!S.info.tags.includes('遅番')) $('#notSel').selectedIndex = 0; else $('#notSel').value = '遅番';
+  setPen(S.pen);
+}
+function setPen(p) {
+  S.pen = p;
+  document.querySelectorAll('.pen').forEach(b => b.classList.remove('on'));
+  const hit = [...document.querySelectorAll('.pen[data-pen]')].find(b => b.dataset.pen === p);
+  if (hit) hit.classList.add('on');
+  else if (/^[×]/.test(p)) $('#notPen').classList.add('on');
+  else $('#freePen').classList.add('on');
+}
+function paintCell(td, v) {
+  td.textContent = v || ''; td.title = v || '';
+  td.className = 'c ' + (td.dataset.dc || '');
+  td.style.background = '';
+  if (!v) return;
+  if (!validValue(v)) td.classList.add('bad');
+  else if (/^[?？]/.test(v)) td.classList.add('wish');
+  else if (/^[×xX✕]/.test(v)) td.classList.add('not');
+  else { const c = codeInfo(v); if (c?.color) td.style.background = '#' + c.color; }
+}
+function renderPlan() {
+  const g = $('#planGrid'); if (!S.info) { g.innerHTML = ''; return; }
+  const ds = days(S.month);
+  let h = '<thead><tr><th class="nm">氏名</th>' + ds.map(d => `<th class="${dayClass(d)}" title="${esc(S.info.holidays[d.iso] || '')}">${d.day}<br>${WEEK[d.wd]}</th>`).join('') + '<th class="sum">休</th><th class="sum">休暇</th></tr></thead><tbody>';
+  for (const s of S.info.staff) {
+    h += `<tr data-key="${esc(s.key)}"><td class="nm" title="${esc(s.groups.join(','))}">${esc(s.no)} ${esc(s.name)}</td>`;
+    h += ds.map(d => `<td class="c ${dayClass(d)}" data-dc="${dayClass(d)}" data-day="${d.day}"></td>`).join('');
+    h += '<td class="sum k"></td><td class="sum y"></td></tr>';
+  }
+  h += '</tbody><tfoot><tr><td class="nm">休み希望の人数</td>' + ds.map(d => `<td data-foot="${d.day}"></td>`).join('') + '<td></td><td></td></tr></tfoot>';
+  g.innerHTML = h;
+  g.querySelectorAll('tbody tr').forEach(tr => tr.querySelectorAll('td.c').forEach(td => paintCell(td, S.plan.get(tr.dataset.key + '|' + td.dataset.day))));
+  updateSums();
+}
+function updateSums() {
+  const g = $('#planGrid'); if (!S.info) return;
+  const def = S.holN ?? S.info.basic?.['既定公休数'];
+  const foot = {};
+  for (const s of S.info.staff) {
+    const tr = g.querySelector(`tr[data-key="${CSS.escape(s.key)}"]`); if (!tr) continue;
+    let k = 0, y = 0;
+    for (const [key, v] of S.plan) {
+      const [sk, day] = key.split('|'); if (sk !== s.key) continue;
+      if (isKokyu(v)) k++; else if (codeInfo(v) && codeInfo(v).kind === '休暇') y++;
+      if (isRestValue(v)) foot[day] = (foot[day] || 0) + 1;
+    }
+    const lim = s.holidays ?? def;
+    const kt = tr.querySelector('.k'); kt.textContent = lim != null ? `${k}/${lim}` : k; kt.classList.toggle('over', lim != null && k > lim);
+    tr.querySelector('.y').textContent = y || '';
+  }
+  g.querySelectorAll('[data-foot]').forEach(td => td.textContent = foot[td.dataset.foot] || '');
+}
+
+// ドラッグで塗る
+let stroke = null;
+function cellAt(x, y) { const el = document.elementFromPoint(x, y); return el && el.matches?.('#planGrid td.c') ? el : null; }
+function applyTo(td) {
+  if (!stroke || stroke.done.has(td)) return;
+  stroke.done.add(td);
+  const key = td.parentElement.dataset.key, day = Number(td.dataset.day), id = key + '|' + day;
+  const before = S.plan.get(id) || '', after = stroke.value;
+  if (before === after) return;
+  if (after) S.plan.set(id, after); else S.plan.delete(id);
+  paintCell(td, after);
+  stroke.changes.push({ key, day, before, after });
+}
+$('#planGrid').addEventListener('pointerdown', e => {
+  const td = e.target.closest('td.c'); if (!td || e.button > 0) return;
+  e.preventDefault();
+  const cur = S.plan.get(td.parentElement.dataset.key + '|' + td.dataset.day) || '';
+  stroke = { value: cur && cur === S.pen ? '' : S.pen, done:new Set(), changes:[] };
+  applyTo(td);
+});
+window.addEventListener('pointermove', e => { if (stroke) { const td = cellAt(e.clientX, e.clientY); if (td) applyTo(td); } });
+window.addEventListener('pointerup', () => {
+  if (!stroke) return;
+  if (stroke.changes.length) { S.undo.push(stroke.changes); queueSave(stroke.changes.map(c => ({ key:c.key, day:c.day, value:c.after }))); updateSums(); }
+  stroke = null;
+});
+function undo() {
+  const ch = S.undo.pop(); if (!ch) return;
+  for (const c of ch) { const id = c.key + '|' + c.day; if (c.before) S.plan.set(id, c.before); else S.plan.delete(id); }
+  renderPlan(); queueSave(ch.map(c => ({ key:c.key, day:c.day, value:c.before })));
+}
+function queueSave(changes) {
+  for (const c of changes) S.pending.set(c.key + '|' + c.day, c);
+  $('#saved').textContent = '保存待ち…';
+  clearTimeout(S.timer); S.timer = setTimeout(flush, 700);
+}
+async function flush() {
+  if (!S.pending.size) return;
+  const changes = [...S.pending.values()]; S.pending.clear();
+  try { await api('/api/plan', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ month:S.month, changes }) });
+        $('#saved').textContent = '保存しました ' + new Date().toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' }); }
+  catch (e) { for (const c of changes) S.pending.set(c.key + '|' + c.day, c); $('#saved').textContent = '保存できませんでした'; toast('保存に失敗: ' + e.message, true); }
+}
+window.addEventListener('beforeunload', e => { if (S.pending.size) { flush(); e.preventDefault(); } });
+
+$('#toolbar').addEventListener('click', e => {
+  const b = e.target.closest('.pen'); if (!b) return;
+  if (b.id === 'notPen') setPen('×' + $('#notSel').value);
+  else if (b.id === 'freePen') { const v = norm($('#freeIn').value); if (!validValue(v)) return toast('「' + v + '」は勤務コードにもタグにもありません', true); setPen(v); }
+  else setPen(b.dataset.pen);
+});
+$('#notSel').addEventListener('change', () => setPen('×' + $('#notSel').value));
+$('#undo').onclick = undo;
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'z' && $('#tab-plan').classList.contains('on')) { e.preventDefault(); undo(); } });
+$('#holN').addEventListener('change', async () => {
+  S.holN = $('#holN').value === '' ? null : Number($('#holN').value);
+  await api('/api/meta', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ month:S.month, holidays_n:S.holN }) });
+  updateSums(); toast('公休数を保存しました');
+});
+$('#clearPlan').onclick = async () => {
+  if (!confirm(S.month + ' の予定（希望休など）をすべて消します。よろしいですか？')) return;
+  await api('/api/plan/clear', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ month:S.month }) });
+  S.plan.clear(); S.undo = []; renderPlan();
+};
+
+// ------------------------------------------------ 特別日
+function renderSpecial() {
+  const [y, m] = S.month.split('-'); const last = days(S.month).length;
+  $('#spDate').min = `${S.month}-01`; $('#spDate').max = `${S.month}-${last}`;
+  if (!$('#spDate').value.startsWith(S.month)) $('#spDate').value = `${S.month}-01`;
+  if (S.info) $('#spTarget').innerHTML = S.info.tags.map(t => `<option>${esc(t)}</option>`).join('') + '<option disabled>──</option>' + S.info.codes.map(c => `<option>${esc(c.code)}</option>`).join('');
+  $('#spList').innerHTML = '<tr><th>日付</th><th>対象</th><th>最小</th><th>最大</th><th>備考</th><th></th></tr>' +
+    (S.specials.length ? S.specials.map(x => { const d = new Date(x.date + 'T00:00'); return `<tr><td>${x.date.slice(5).replace('-', '/')}（${WEEK[d.getDay()]}）</td><td>${esc(x.target)}</td><td>${x.min ?? ''}</td><td>${x.max ?? ''}</td><td>${esc(x.note)}</td><td><button data-del="${x.id}">削除</button></td></tr>`; }).join('')
+      : '<tr><td colspan="6" class="muted">この月の特別日はありません</td></tr>');
+}
+$('#spAdd').onclick = async () => {
+  const body = { month:S.month, date:$('#spDate').value, target:$('#spTarget').value, min:$('#spMin').value, max:$('#spMax').value, note:$('#spNote').value };
+  if (body.min === '' && body.max === '') return toast('最小か最大を入れてください', true);
+  try { await api('/api/special', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        $('#spMin').value = $('#spMax').value = $('#spNote').value = ''; await reloadKeepTab(); }
+  catch (e) { toast(e.message, true); }
+};
+$('#spList').addEventListener('click', async e => { const id = e.target.dataset.del; if (!id) return; await api('/api/special?id=' + id, { method:'DELETE' }); await reloadKeepTab(); });
+
+// ------------------------------------------------ 自動作成
+function vioTable(V) {
+  if (!V.length) return '<p><b style="color:#2e7d32">ルール違反はありません</b></p>';
+  return '<table class="list"><tr><th>種類</th><th>日付</th><th>職員</th><th>内容</th></tr>' + V.map(v => {
+    const d = v.date ? new Date(v.date + 'T00:00') : null;
+    return `<tr><td>${esc(v.kind)}</td><td>${d ? `${d.getMonth()+1}/${d.getDate()}（${WEEK[d.getDay()]}）` : ''}</td><td>${esc(v.staff)}</td><td>${esc(v.msg)}</td></tr>`; }).join('') + '</table>';
+}
+function renderResult() {
+  const r = S.result;
+  $('#dlResult').style.display = r ? 'inline' : 'none';
+  $('#dlResult').href = '/api/result?month=' + S.month;
+  if (!r) { $('#solveSummary').innerHTML = '<p class="muted">まだこの月は自動作成していません。</p>'; $('#resultWrap').style.display = 'none'; return; }
+  $('#solveSummary').innerHTML = `<p>${esc(r.created)} 作成 ／ ${esc(r.status)} ／ 公休数 ${r.holidays_n ?? '-'} ／ 残った違反 <b>${r.violations.length}件</b></p>` +
+    (r.notes?.length ? '<p class="err">' + r.notes.map(esc).join('<br>') + '</p>' : '') + vioTable(r.violations);
+  const ds = days(S.month); const vio = new Set(r.violations.filter(v => v.staff && v.date).map(v => v.staff + '|' + v.date));
+  const tagCols = ['公休', '遅番', '当番D', '出勤'].filter(t => S.info?.tags.includes(t));
+  let h = '<thead><tr><th class="nm">氏名</th>' + ds.map(d => `<th class="${dayClass(d)}">${d.day}<br>${WEEK[d.wd]}</th>`).join('') + tagCols.map(t => `<th class="sum">${esc(t)}</th>`).join('') + '</tr></thead><tbody>';
+  const perDay = {};
+  for (const s of S.info?.staff || []) {
+    const row = r.table[s.key]; if (!row) continue;
+    h += `<tr><td class="nm">${esc(s.no)} ${esc(s.name)}</td>`;
+    row.forEach((v, i) => { const c = codeInfo(v); const d = ds[i];
+      if (c) for (const t of c.tags) { perDay[t] = perDay[t] || {}; perDay[t][i] = (perDay[t][i] || 0) + 1; }
+      h += `<td class="c ${dayClass(d)} ${vio.has(s.name + '|' + d.iso) ? 'vio' : ''}" style="${c?.color ? 'background:#' + c.color : ''}" title="${esc(v)}">${esc(v ?? '')}</td>`; });
+    h += tagCols.map(t => `<td class="sum">${row.filter(v => codeInfo(v)?.tags.includes(t)).length}</td>`).join('') + '</tr>';
+  }
+  const footTags = ['出勤', '遅番', '当番D'].filter(t => perDay[t]);
+  h += '</tbody><tfoot>' + footTags.map((t, k) => { const st = `style="bottom:${(footTags.length - 1 - k) * 25}px"`;
+    return `<tr><td class="nm" ${st}>${esc(t)}（人）</td>` + ds.map((d, i) => `<td ${st}>${perDay[t][i] || 0}</td>`).join('') + tagCols.map(() => `<td ${st}></td>`).join('') + '</tr>'; }).join('') + '</tfoot>';
+  $('#resultGrid').innerHTML = h; $('#resultWrap').style.display = 'block';
+}
+$('#solveBtn').onclick = async () => {
+  await flush();
+  const btn = $('#solveBtn'); btn.disabled = true; const t0 = Date.now();
+  const tick = setInterval(() => $('#solveMsg').innerHTML = `<span class="spinner"></span> 計算中… ${Math.round((Date.now() - t0) / 1000)}秒${waitMsg()}`, 500);
+  try {
+    const { b64 } = await api('/api/settings?raw=1');
+    const req = { settings:b64, month:S.month, holidays_n:S.holN, seconds:Number($('#solveSec').value),
+      cells:[...S.plan].map(([k, value]) => { const i = k.lastIndexOf('|'); return { key:k.slice(0, i), day:Number(k.slice(i + 1)), value }; }),
+      specials:S.specials.map(x => ({ date:x.date, target:x.target, min:x.min, max:x.max, note:x.note })) };
+    const { xlsx, ...summary } = await Engine.call('solve', JSON.stringify(req));
+    const saved = await api('/api/result', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ month:S.month, summary, xlsx }) });
+    S.result = { ...summary, created:saved.created };
+    renderResult(); $('#solveMsg').textContent = `完了（${Math.round((Date.now() - t0) / 1000)}秒）`;
+  } catch (e) { $('#solveMsg').textContent = ''; toast('自動作成に失敗: ' + e.message, true); }
+  finally { clearInterval(tick); btn.disabled = false; }
+};
+
+// ------------------------------------------------ チェック
+$('#ckBtn').onclick = async () => {
+  const f = $('#ckFile').files[0]; if (!f) return toast('ファイルを選んでください', true);
+  $('#ckMsg').innerHTML = '<span class="spinner"></span> チェック中…' + waitMsg();
+  try {
+    const sheet = $('#ckSheet').value.trim(), ym = $('#ckMonth').value.trim();
+    const [{ b64 }, xb64] = await Promise.all([api('/api/settings?raw=1'), fileB64(f)]);
+    // その月に登録してある特別日も使う（手作りの勤務表には特別日が無いため）
+    const mo = await Engine.call('month_of', xb64, sheet, ym);
+    const sp = mo ? (await api('/api/state?month=' + mo)).specials : [];
+    const r = await Engine.call('check', b64, xb64, sheet, ym, f.name,
+      JSON.stringify(sp.map(x => ({ date:x.date, target:x.target, min:x.min, max:x.max, note:x.note }))));
+    const blob = new Blob([Uint8Array.from(atob(r.xlsx), c => c.charCodeAt(0))], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    $('#ckResult').innerHTML = `<p>${r.month.slice(0, 7).replace('-', '年')}月 ／ 違反 <b>${r.violations.length}件</b> <a href="${url}" download="チェック結果_${r.month.slice(0,7)}.xlsx"><button>結果をExcelでダウンロード</button></a></p>` +
+      (r.notes.length ? '<p class="err">' + r.notes.map(esc).join('<br>') + '</p>' : '') + vioTable(r.violations) +
+      `<p class="muted">シート: ${r.sheets.slice(-12).map(esc).join('、')}${r.sheets.length > 12 ? ' ほか' : ''}</p>`;
+    $('#ckMsg').textContent = '';
+  } catch (e) { $('#ckMsg').textContent = ''; toast(e.message, true); }
+};
+
+// ------------------------------------------------ 設定
+function renderSettings(updated) {
+  const i = S.info;
+  if (!i) { $('#setInfo').innerHTML = '<p class="muted">まだ登録されていません。</p>'; $('#setDl').style.display = 'none'; return; }
+  $('#setDl').style.display = 'inline';
+  $('#setInfo').innerHTML = `<p>登録日時 ${esc(updated)} ／ 職員 ${i.staff.length}人 ／ 勤務種類 ${i.codes.length}種類 ／ 祝日・休診日 ${Object.keys(i.holidays).length}日</p>` +
+    (i.errors.length ? '<p class="err"><b>設定の確認が必要です</b><br>' + i.errors.map(esc).join('<br>') + '</p>' : '') +
+    '<p>タグ: ' + i.tags.map(t => `<span class="pill">${esc(t)}</span>`).join('') + '</p>' +
+    '<table class="list"><tr><th>コード</th><th>名称</th><th>種別</th><th>タグ</th><th>自動配置</th><th>色</th></tr>' +
+    i.codes.map(c => `<tr><td>${esc(c.code)}</td><td>${esc(c.name)}</td><td>${esc(c.kind)}</td><td>${c.tags.map(esc).join(', ')}</td><td>${c.auto ? '○' : '×'}</td><td>${c.color ? `<span class="swatch" style="background:#${c.color}"></span>` : ''}</td></tr>`).join('') + '</table>';
+}
+$('#setBtn').onclick = async () => {
+  const f = $('#setFile').files[0]; if (!f) return toast('ファイルを選んでください', true);
+  $('#setMsg').innerHTML = '<span class="spinner"></span> 読み込み中…' + waitMsg();
+  try {
+    const b64 = await fileB64(f);
+    const info = await Engine.call('info', b64);
+    await api('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ b64, info }) });
+    $('#setMsg').textContent = '登録しました'; await reloadKeepTab();
+  }
+  catch (e) { $('#setMsg').textContent = ''; toast('登録に失敗: ' + e.message, true); }
+};
+
+// ------------------------------------------------ タブ・月
+function showTab(name) {
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 'tab-' + name));
+}
+async function reloadKeepTab() { const cur = document.querySelector('nav button.on').dataset.tab; await load(); showTab(cur); }
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+$('#prev').onclick = async () => { await flush(); S.month = shiftMonth(S.month, -1); reloadKeepTab(); };
+$('#next').onclick = async () => { await flush(); S.month = shiftMonth(S.month, 1); reloadKeepTab(); };
+
+(async () => {
+  const q = new URLSearchParams(location.search).get('month');
+  const t = jstToday();
+  S.month = /^\d{4}-\d{2}$/.test(q || '') ? q : shiftMonth(`${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2,'0')}`, 1);
+  try { await load(); } catch (e) { toast(e.message, true); }
+  Engine.start();
+})();
+</script>
+</body>
+</html>
