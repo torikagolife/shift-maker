@@ -31,7 +31,8 @@ def info(settings_b64):
         staff=[dict(no=s['no'], name=s['name'], key=s['key'], groups=sorted(s['groups']),
                     holidays=E.num(s['holidays'])) for s in cfg.staff],
         codes=[dict(code=c, name=str(v['name']), kind=v['kind'], color=v['color'], auto=v['auto'],
-                    tags=sorted(v['tags'])) for c, v in cfg.codes.items()],
+                    tags=sorted(v['tags']), group=v['group']) for c, v in cfg.codes.items()],
+        groups=cfg.groups,
         tags=sorted(cfg.all_tags),
         holidays={d.isoformat(): str(n) for d, n in cfg.holidays.items()},
         basic={k: (v if isinstance(v, (int, float, str)) or v is None else str(v)) for k, v in cfg.basic.items()},
@@ -156,6 +157,9 @@ def sheets(settings_b64):
                     break
                 head.append(h)
             body = [r[:len(head)] + [''] * (len(head) - len(r[:len(head)])) for r in rows[1:] if any(r[:len(head)])]
+            if name == '勤務種類' and '勤務グループ' not in head:
+                head.append('勤務グループ')
+                body = [r + [''] for r in body]
         out[name] = dict(headers=head, rows=body)
     return out
 
@@ -173,8 +177,16 @@ def save_sheets(settings_b64, data_json):
         start = 1 if name == '基本設定' else 2
         if ws.max_row >= start:
             ws.delete_rows(start, ws.max_row - start + 1)
-        if name != '基本設定' and ws.max_row < 1:
-            ws.append(head)
+        if name != '基本設定':
+            from copy import copy
+            for j, h in enumerate(head):
+                c = ws.cell(1, j + 1)
+                if c.value != h:
+                    c.value = h
+                    src = ws.cell(1, 1)
+                    if src.has_style:
+                        c.font, c.fill, c.alignment, c.border = copy(src.font), copy(src.fill), copy(src.alignment), copy(src.border)
+                        ws.column_dimensions[c.column_letter].width = 12
         for k, row in enumerate(t['rows']):
             r = start + k
             for j, h in enumerate(head):
