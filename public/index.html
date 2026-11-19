@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>シフト作成</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📒</text></svg>">
 <style>
   :root { --line:#d5d9de; --head:#2f5d8a; --weekend:#eef1f5; --hol:#fde8e8; --bad:#ff8f8f; }
   * { box-sizing: border-box; }
@@ -62,6 +63,18 @@
   #toast.err { background:#c62828; }
   .pill { display:inline-block; padding:1px 8px; border-radius:10px; background:#e8eef5; margin:1px; font-size:12px; }
   .help { font-size:12px; color:#556; line-height:1.7; }
+  .subtabs { display:flex; gap:4px; flex-wrap:wrap; margin:8px 0; }
+  .subtabs button.on { background:var(--head); color:#fff; border-color:var(--head); }
+  .edwrap { overflow:auto; max-height:calc(100vh - 300px); border:1px solid var(--line); border-radius:6px; background:#fff; }
+  table.ed { border-collapse:collapse; }
+  table.ed th { position:sticky; top:0; background:#f2f4f7; font-weight:normal; color:#445; padding:4px 6px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; z-index:1; }
+  table.ed td { padding:2px 3px; border-bottom:1px solid #eef0f3; }
+  table.ed input, table.ed select { width:100%; padding:2px 4px; font-size:12px; }
+  table.ed tr.chg td { background:#fffbe6; }
+  table.ed .w-xs { width:56px; } table.ed .w-s { width:80px; } table.ed .w-m { width:130px; } table.ed .w-l { width:220px; } table.ed .w-xl { width:340px; }
+  .colorbox { display:flex; gap:2px; align-items:center; }
+  .colorbox input[type=color] { width:26px; padding:0; height:22px; border:none; background:none; }
+  #edDirty { color:#c60; font-weight:bold; }
   .help code { background:#eef1f5; padding:0 4px; border-radius:3px; }
 </style>
 </head>
@@ -134,6 +147,7 @@
         <select id="solveSec"><option value="30">30秒</option><option value="60" selected>60秒</option><option value="120">120秒</option></select>
         <span id="solveMsg" class="muted"></span>
         <a id="dlResult" style="margin-left:auto;display:none"><button>Excelでダウンロード</button></a>
+        <button id="clearResult" style="display:none">結果をクリア</button>
       </div>
       <div id="solveSummary"></div>
     </div>
@@ -158,6 +172,19 @@
 
   <!-- 設定 -->
   <section class="tab" id="tab-settings">
+    <div class="card" id="edCard" style="display:none">
+      <b>設定を編集</b>
+      <span class="muted">ここで直して「保存して反映」を押すと、設定ファイル（Excel）も書き換わります。</span>
+      <div class="subtabs" id="edTabs"></div>
+      <p class="help" id="edHelp"></p>
+      <div class="edwrap"><table class="ed" id="edTable"></table></div>
+      <div class="toolbar" style="margin-top:8px">
+        <button id="edAdd">＋ 行を追加</button>
+        <button class="primary" id="edSave">保存して反映</button>
+        <button id="edReset">変更を取り消す</button>
+        <span id="edDirty"></span><span id="edMsg" class="muted"></span>
+      </div>
+    </div>
     <div class="card">
       <b>設定ファイル</b>
       <span class="muted">勤務種類・職員・必要人数・ルール・祝日を書いた Excel（設定.xlsx）。変更したら登録し直してください。</span>
@@ -415,6 +442,7 @@ function vioTable(V) {
 function renderResult() {
   const r = S.result;
   $('#dlResult').style.display = r ? 'inline' : 'none';
+  $('#clearResult').style.display = r ? 'inline-block' : 'none';
   $('#dlResult').href = '/api/result?month=' + S.month;
   if (!r) { $('#solveSummary').innerHTML = '<p class="muted">まだこの月は自動作成していません。</p>'; $('#resultWrap').style.display = 'none'; return; }
   $('#solveSummary').innerHTML = `<p>${esc(r.created)} 作成 ／ ${esc(r.status)} ／ 公休数 ${r.holidays_n ?? '-'} ／ 残った違反 <b>${r.violations.length}件</b></p>` +
@@ -451,6 +479,12 @@ $('#solveBtn').onclick = async () => {
     renderResult(); $('#solveMsg').textContent = `完了（${Math.round((Date.now() - t0) / 1000)}秒）`;
   } catch (e) { $('#solveMsg').textContent = ''; toast('自動作成に失敗: ' + e.message, true); }
   finally { clearInterval(tick); btn.disabled = false; }
+};
+
+$('#clearResult').onclick = async () => {
+  if (!confirm(S.month + ' の自動作成の結果を消します。（希望・予定や特別日は消えません）')) return;
+  try { await api('/api/result?month=' + S.month, { method:'DELETE' }); S.result = null; renderResult(); $('#solveMsg').textContent = ''; toast('結果をクリアしました'); }
+  catch (e) { toast(e.message, true); }
 };
 
 // ------------------------------------------------ チェック
@@ -492,15 +526,129 @@ $('#setBtn').onclick = async () => {
     const b64 = await fileB64(f);
     const info = await Engine.call('info', b64);
     await api('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ b64, info }) });
-    $('#setMsg').textContent = '登録しました'; await reloadKeepTab();
+    $('#setMsg').textContent = '登録しました'; ED.data = null; await reloadKeepTab(); loadEd(true);
   }
   catch (e) { $('#setMsg').textContent = ''; toast('登録に失敗: ' + e.message, true); }
 };
+
+// ------------------------------------------------ 設定の編集
+const ED = { data:null, orig:null, b64:null, sheet:'勤務種類', loading:false };
+const ED_HELP = {
+  '基本設定': '部署名・既定公休数（予定表で公休数を入れなかった月に使う）・計算時間（秒）・希望の重み（?休 などをどれだけ優先するか）。',
+  '勤務種類': '<code>種別</code> 勤務／休み／休暇。<code>タグ</code> はカンマ区切りで、必要人数やルールでまとめて指定するための名前。<code>自動配置</code> × は予定表に書いたときだけ入る勤務（有休など）。',
+  '職員': '<code>使える勤務</code> はコードかタグをカンマ区切り（空欄＝種別が勤務のものすべて）。<code>グループ</code> はルールの対象職員で使う名前。<code>公休数</code> 空欄＝その月の公休数。※氏名を変えると、その人の入力済みの希望が外れます。',
+  '必要人数': '<code>日の種類</code> ごとに、<code>対象</code>（タグかコード）の人数の最小・最大。特定の日だけ変えたいときは「特別日」タブで。',
+  'ルール': '連勤上限（タグ1が「数値」日を超えて続かない）／翌日禁止（タグ1の次の日にタグ2を入れない）／月回数上限・下限／均等化（回数をそろえる。重みが大きいほど優先）／同日上限（対象職員のうちタグ1の人が同じ日に「数値」人まで）。<code>対象職員</code> は 全員・グループ名・No（1,7）・氏名。',
+  '祝日': '祝日と、年末年始など祝日以外の休診日。ここに入れた日は「祝日」として扱われます。',
+};
+const DAY_TYPES = ['毎日','平日','土曜','日曜','祝日','月','火','水','木','金'];
+const RULES = ['連勤上限','翌日禁止','月回数上限','月回数下限','均等化','同日上限'];
+function colDef(sheet, h) {
+  const sel = (opts, w = 'w-s') => ({ kind:'select', opts, w });
+  if (h === '種別') return sel(['勤務','休み','休暇']);
+  if (h === '自動配置' || h === '有効') return sel(['○','×'], 'w-xs');
+  if (h === 'ルール') return sel(RULES, 'w-m');
+  if (h === '日の種類') return sel(sheet === 'ルール' ? ['', ...DAY_TYPES] : DAY_TYPES);
+  if (h === '背景色') return { kind:'color', w:'w-m' };
+  if (h === '日付') return { kind:'date', w:'w-m' };
+  if (['対象','タグ1','タグ2'].includes(h)) return { kind:'list', w:'w-s' };
+  if (['最小','最大','数値','重み','公休数','No'].includes(h)) return { kind:'num', w:'w-xs' };
+  if (['開始','終了'].includes(h)) return { kind:'text', w:'w-xs', ph:'8:30' };
+  if (['タグ','使える勤務','グループ','対象職員'].includes(h)) return { kind:'text', w:'w-l' };
+  if (['説明','備考','値'].includes(h)) return { kind:'text', w:'w-xl' };
+  return { kind:'text', w:'w-m' };
+}
+function cellInput(sheet, h, v, r, c) {
+  const d = colDef(sheet, h), at = `data-r="${r}" data-c="${c}"`;
+  if (d.kind === 'select') {
+    const opts = d.opts.includes(v) ? d.opts : [v, ...d.opts];
+    return `<select class="${d.w}" ${at}>${opts.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  }
+  if (d.kind === 'color') {
+    const hex = /^[0-9a-f]{6}$/i.test(v) ? '#' + v : '#ffffff';
+    return `<div class="colorbox"><input type="color" value="${hex}" ${at} data-color="1"><input class="w-s" value="${esc(v)}" ${at} style="background:${/^[0-9a-f]{6}$/i.test(v) ? '#' + v : '#fff'}"></div>`;
+  }
+  if (d.kind === 'date') return `<input type="date" class="${d.w}" value="${esc(v)}" ${at}>`;
+  if (d.kind === 'num') return `<input type="number" class="${d.w}" value="${esc(v)}" ${at}>`;
+  if (d.kind === 'list') return `<input class="${d.w}" list="edTokens" value="${esc(v)}" ${at}>`;
+  return `<input class="${d.w}" value="${esc(v)}" ${at} ${d.ph ? `placeholder="${d.ph}"` : ''}>`;
+}
+function edDirty() { return ED.data && JSON.stringify(ED.data) !== JSON.stringify(ED.orig); }
+function origSet() { return new Set(ED.orig[ED.sheet].rows.map(r => JSON.stringify(r))); }
+function renderEdTabs() {
+  $('#edTabs').innerHTML = Object.keys(ED.data).map(n => {
+    const chg = JSON.stringify(ED.data[n]) !== JSON.stringify(ED.orig[n]);
+    return `<button data-sheet="${esc(n)}" class="${n === ED.sheet ? 'on' : ''}">${esc(n)}${chg ? ' ●' : ''} <span class="muted">${ED.data[n].rows.length}</span></button>`; }).join('');
+  $('#edDirty').textContent = edDirty() ? '未保存の変更があります' : '';
+}
+function renderEd() {
+  if (!ED.data) return;
+  const names = Object.keys(ED.data);
+  if (!names.includes(ED.sheet)) ED.sheet = names[0];
+  renderEdTabs();
+  $('#edHelp').innerHTML = ED_HELP[ED.sheet] || '';
+  const t = ED.data[ED.sheet], os = origSet();
+  const tokens = S.info ? [...S.info.tags, ...S.info.codes.map(c => c.code)] : [];
+  $('#edTable').innerHTML = `<datalist id="edTokens">${[...new Set(tokens)].map(x => `<option value="${esc(x)}">`).join('')}</datalist>` +
+    '<tr>' + t.headers.map(h => `<th>${esc(h)}</th>`).join('') + '<th></th></tr>' +
+    t.rows.map((row, r) => `<tr class="${os.has(JSON.stringify(row)) ? '' : 'chg'}">` +
+      t.headers.map((h, c) => `<td>${cellInput(ED.sheet, h, row[c] ?? '', r, c)}</td>`).join('') +
+      `<td><button data-delrow="${r}" title="この行を削除">×</button></td></tr>`).join('');
+}
+async function loadEd(force) {
+  if (!S.info || ED.loading || (ED.data && !force)) { renderEd(); return; }
+  ED.loading = true; $('#edCard').style.display = 'block';
+  $('#edMsg').innerHTML = '<span class="spinner"></span> 読み込み中…' + waitMsg();
+  try {
+    ED.b64 = (await api('/api/settings?raw=1')).b64;
+    ED.data = await Engine.call('sheets', ED.b64);
+    ED.orig = JSON.parse(JSON.stringify(ED.data));
+    $('#edMsg').textContent = ''; renderEd();
+  } catch (e) { $('#edMsg').textContent = ''; toast('設定の読み込みに失敗: ' + e.message, true); }
+  finally { ED.loading = false; }
+}
+$('#edTabs').addEventListener('click', e => { const b = e.target.closest('[data-sheet]'); if (b) { ED.sheet = b.dataset.sheet; renderEd(); } });
+$('#edTable').addEventListener('input', e => {
+  const el = e.target, r = el.dataset.r, c = el.dataset.c; if (r == null) return;
+  let v = el.value;
+  if (el.dataset.color) { v = v.replace('#', '').toUpperCase(); const txt = el.parentElement.querySelector('input:not([type=color])'); txt.value = v; txt.style.background = '#' + v; }
+  else if (el.parentElement.classList.contains('colorbox')) { v = v.replace('#', '').toUpperCase(); if (/^[0-9A-F]{6}$/.test(v)) { el.style.background = '#' + v; el.parentElement.querySelector('[type=color]').value = '#' + v; } }
+  ED.data[ED.sheet].rows[r][c] = v;
+  el.closest('tr').classList.toggle('chg', !origSet().has(JSON.stringify(ED.data[ED.sheet].rows[r])));
+  renderEdTabs();
+});
+function renderEdKeepScroll() { const y = $('.edwrap').scrollTop; renderEd(); $('.edwrap').scrollTop = y; }
+$('#edTable').addEventListener('click', e => {
+  const r = e.target.dataset.delrow; if (r == null) return;
+  ED.data[ED.sheet].rows.splice(Number(r), 1);
+  renderEdKeepScroll();
+});
+$('#edAdd').onclick = () => {
+  const t = ED.data[ED.sheet]; const row = t.headers.map(h => {
+    const d = colDef(ED.sheet, h); if (h === '自動配置' || h === '有効') return '○'; if (h === '種別') return '勤務';
+    if (h === '日の種類' && ED.sheet === '必要人数') return '平日'; if (h === 'ルール') return '連勤上限'; return ''; });
+  t.rows.push(row); renderEd(); const w = $('.edwrap'); w.scrollTop = w.scrollHeight;
+};
+$('#edReset').onclick = () => { if (!edDirty() || confirm('保存していない変更を取り消します。')) { ED.data = JSON.parse(JSON.stringify(ED.orig)); renderEd(); } };
+$('#edSave').onclick = async () => {
+  if (!edDirty()) return toast('変更はありません');
+  $('#edMsg').innerHTML = '<span class="spinner"></span> 保存中…';
+  try {
+    const r = await Engine.call('save_sheets', ED.b64, JSON.stringify(ED.data));
+    await api('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ b64:r.b64, info:r.info }) });
+    ED.b64 = r.b64; ED.orig = JSON.parse(JSON.stringify(ED.data));
+    $('#edMsg').textContent = '';
+    toast(r.info.errors.length ? '保存しました（設定の確認が必要な点があります。下の表示を見てください）' : '保存しました', r.info.errors.length > 0);
+    await reloadKeepTab();
+  } catch (e) { $('#edMsg').textContent = ''; toast('保存に失敗: ' + e.message, true); }
+};
+window.addEventListener('beforeunload', e => { if (edDirty()) e.preventDefault(); });
 
 // ------------------------------------------------ タブ・月
 function showTab(name) {
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 'tab-' + name));
+  if (name === 'settings' && S.info) { $('#edCard').style.display = 'block'; loadEd(false); }
 }
 async function reloadKeepTab() { const cur = document.querySelector('nav button.on').dataset.tab; await load(); showTab(cur); }
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
