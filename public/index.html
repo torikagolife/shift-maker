@@ -75,6 +75,9 @@
   .colorbox { display:flex; gap:2px; align-items:center; }
   .colorbox input[type=color] { width:26px; padding:0; height:22px; border:none; background:none; }
   #edDirty { color:#c60; font-weight:bold; }
+  table.gview td.c { min-width:92px; max-width:92px; width:92px; text-align:left; padding:0 3px; cursor:default; }
+  table.gview tr.gh td { background:var(--head) !important; color:#fff; font-weight:bold; text-align:center; }
+  table.gview tr.gh td.nm { text-align:left; }
   .help code { background:#eef1f5; padding:0 4px; border-radius:3px; }
 </style>
 </head>
@@ -150,8 +153,13 @@
         <button id="clearResult" style="display:none">結果をクリア</button>
       </div>
       <div id="solveSummary"></div>
+      <div class="subtabs" id="viewTabs" style="display:none">
+        <button data-view="person" class="on">個人別</button>
+        <button data-view="group">グループ別（誰がどこに入っているか）</button>
+      </div>
     </div>
     <div class="gridwrap" id="resultWrap" style="display:none"><table class="grid" id="resultGrid"></table></div>
+    <div class="gridwrap" id="groupWrap" style="display:none"><table class="grid gview" id="groupGrid"></table></div>
   </section>
 
   <!-- チェック -->
@@ -444,7 +452,7 @@ function renderResult() {
   $('#dlResult').style.display = r ? 'inline' : 'none';
   $('#clearResult').style.display = r ? 'inline-block' : 'none';
   $('#dlResult').href = '/api/result?month=' + S.month;
-  if (!r) { $('#solveSummary').innerHTML = '<p class="muted">まだこの月は自動作成していません。</p>'; $('#resultWrap').style.display = 'none'; return; }
+  if (!r) { $('#solveSummary').innerHTML = '<p class="muted">まだこの月は自動作成していません。</p>'; $('#resultWrap').style.display = 'none'; $('#groupWrap').style.display = 'none'; $('#viewTabs').style.display = 'none'; return; }
   $('#solveSummary').innerHTML = `<p>${esc(r.created)} 作成 ／ ${esc(r.status)} ／ 公休数 ${r.holidays_n ?? '-'} ／ 残った違反 <b>${r.violations.length}件</b></p>` +
     (r.notes?.length ? '<p class="err">' + r.notes.map(esc).join('<br>') + '</p>' : '') + vioTable(r.violations);
   const ds = days(S.month); const vio = new Set(r.violations.filter(v => v.staff && v.date).map(v => v.staff + '|' + v.date));
@@ -462,7 +470,10 @@ function renderResult() {
   const footTags = ['出勤', '遅番', '当番D'].filter(t => perDay[t]);
   h += '</tbody><tfoot>' + footTags.map((t, k) => { const st = `style="bottom:${(footTags.length - 1 - k) * 25}px"`;
     return `<tr><td class="nm" ${st}>${esc(t)}（人）</td>` + ds.map((d, i) => `<td ${st}>${perDay[t][i] || 0}</td>`).join('') + tagCols.map(() => `<td ${st}></td>`).join('') + '</tr>'; }).join('') + '</tfoot>';
-  $('#resultGrid').innerHTML = h; $('#resultWrap').style.display = 'block';
+  $('#resultGrid').innerHTML = h;
+  renderGroupView(r, ds);
+  $('#viewTabs').style.display = 'flex';
+  showView(S.view || 'person');
 }
 $('#solveBtn').onclick = async () => {
   await flush();
@@ -480,6 +491,38 @@ $('#solveBtn').onclick = async () => {
   } catch (e) { $('#solveMsg').textContent = ''; toast('自動作成に失敗: ' + e.message, true); }
   finally { clearInterval(tick); btn.disabled = false; }
 };
+
+// グループ別: 日ごとに、各グループに誰が入っているか
+function renderGroupView(r, ds) {
+  const groups = S.info?.groups || [];
+  const cell = {};   // group|日index -> [{name, code, color}]
+  for (const s of S.info?.staff || []) {
+    (r.table[s.key] || []).forEach((v, i) => {
+      if (!v) return;
+      const c = codeInfo(v); const g = c ? c.group : '未登録';
+      (cell[g + '|' + i] = cell[g + '|' + i] || []).push({ name: s.name.replace(/[\s\u3000]/g, ''), code: v, color: c?.color });
+    });
+  }
+  const all = [...groups, ...(Object.keys(cell).some(k => k.startsWith('未登録|')) ? ['未登録'] : [])];
+  let h = '<thead><tr><th class="nm">グループ</th>' + ds.map(d => `<th class="${dayClass(d)}">${d.day}<br>${WEEK[d.wd]}</th>`).join('') + '</tr></thead><tbody>';
+  for (const g of all) {
+    const n = Math.max(0, ...ds.map((_, i) => (cell[g + '|' + i] || []).length));
+    if (!n) continue;
+    h += `<tr class="gh"><td class="nm">${esc(g)}</td>` + ds.map((_, i) => `<td>${(cell[g + '|' + i] || []).length}</td>`).join('') + '</tr>';
+    for (let k = 0; k < n; k++) {
+      h += '<tr><td class="nm"></td>' + ds.map((d, i) => { const x = (cell[g + '|' + i] || [])[k];
+        return x ? `<td class="c" style="${x.color ? 'background:#' + x.color : ''}" title="${esc(x.name + ' ' + x.code)}">${esc(x.name)} <small>${esc(x.code)}</small></td>` : `<td class="c ${dayClass(d)}"></td>`; }).join('') + '</tr>';
+    }
+  }
+  $('#groupGrid').innerHTML = h + '</tbody>';
+}
+function showView(v) {
+  S.view = v;
+  document.querySelectorAll('#viewTabs button').forEach(b => b.classList.toggle('on', b.dataset.view === v));
+  $('#resultWrap').style.display = v === 'person' ? 'block' : 'none';
+  $('#groupWrap').style.display = v === 'group' ? 'block' : 'none';
+}
+$('#viewTabs').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) showView(b.dataset.view); });
 
 $('#clearResult').onclick = async () => {
   if (!confirm(S.month + ' の自動作成の結果を消します。（希望・予定や特別日は消えません）')) return;
@@ -535,7 +578,7 @@ $('#setBtn').onclick = async () => {
 const ED = { data:null, orig:null, b64:null, sheet:'勤務種類', loading:false };
 const ED_HELP = {
   '基本設定': '部署名・既定公休数（予定表で公休数を入れなかった月に使う）・計算時間（秒）・希望の重み（?休 などをどれだけ優先するか）。',
-  '勤務種類': '<code>種別</code> 勤務／休み／休暇。<code>タグ</code> はカンマ区切りで、必要人数やルールでまとめて指定するための名前。<code>自動配置</code> × は予定表に書いたときだけ入る勤務（有休など）。',
+  '勤務種類': '<code>勤務グループ</code> は受付・診察室など、その勤務がどこの担当か（自動作成の結果を「グループ別」で見られます。グループ名は必要人数の対象にも使えます）。<code>種別</code> 勤務／休み／休暇。<code>タグ</code> はカンマ区切りで、必要人数やルールでまとめて指定するための名前。<code>自動配置</code> × は予定表に書いたときだけ入る勤務（有休など）。',
   '職員': '<code>使える勤務</code> はコードかタグをカンマ区切り（空欄＝種別が勤務のものすべて）。<code>グループ</code> はルールの対象職員で使う名前。<code>公休数</code> 空欄＝その月の公休数。※氏名を変えると、その人の入力済みの希望が外れます。',
   '必要人数': '<code>日の種類</code> ごとに、<code>対象</code>（タグかコード）の人数の最小・最大。特定の日だけ変えたいときは「特別日」タブで。',
   'ルール': '連勤上限（タグ1が「数値」日を超えて続かない）／翌日禁止（タグ1の次の日にタグ2を入れない）／月回数上限・下限／均等化（回数をそろえる。重みが大きいほど優先）／同日上限（対象職員のうちタグ1の人が同じ日に「数値」人まで）。<code>対象職員</code> は 全員・グループ名・No（1,7）・氏名。',
@@ -552,6 +595,7 @@ function colDef(sheet, h) {
   if (h === '背景色') return { kind:'color', w:'w-m' };
   if (h === '日付') return { kind:'date', w:'w-m' };
   if (['対象','タグ1','タグ2'].includes(h)) return { kind:'list', w:'w-s' };
+  if (h === '勤務グループ') return { kind:'grp', w:'w-s' };
   if (['最小','最大','数値','重み','公休数','No'].includes(h)) return { kind:'num', w:'w-xs' };
   if (['開始','終了'].includes(h)) return { kind:'text', w:'w-xs', ph:'8:30' };
   if (['タグ','使える勤務','グループ','対象職員'].includes(h)) return { kind:'text', w:'w-l' };
@@ -570,6 +614,7 @@ function cellInput(sheet, h, v, r, c) {
   }
   if (d.kind === 'date') return `<input type="date" class="${d.w}" value="${esc(v)}" ${at}>`;
   if (d.kind === 'num') return `<input type="number" class="${d.w}" value="${esc(v)}" ${at}>`;
+  if (d.kind === 'grp') return `<input class="${d.w}" list="edGroups" value="${esc(v)}" ${at} placeholder="例: 受付">`;
   if (d.kind === 'list') return `<input class="${d.w}" list="edTokens" value="${esc(v)}" ${at}>`;
   return `<input class="${d.w}" value="${esc(v)}" ${at} ${d.ph ? `placeholder="${d.ph}"` : ''}>`;
 }
@@ -589,7 +634,10 @@ function renderEd() {
   $('#edHelp').innerHTML = ED_HELP[ED.sheet] || '';
   const t = ED.data[ED.sheet], os = origSet();
   const tokens = S.info ? [...S.info.tags, ...S.info.codes.map(c => c.code)] : [];
+  const gi = t.headers.indexOf('勤務グループ');
+  const grps = [...new Set([...(gi >= 0 ? t.rows.map(r => r[gi]).filter(Boolean) : []), '受付', '診察室', 'フロア', '医事', 'その他'])];
   $('#edTable').innerHTML = `<datalist id="edTokens">${[...new Set(tokens)].map(x => `<option value="${esc(x)}">`).join('')}</datalist>` +
+    `<datalist id="edGroups">${grps.map(x => `<option value="${esc(x)}">`).join('')}</datalist>` +
     '<tr>' + t.headers.map(h => `<th>${esc(h)}</th>`).join('') + '<th></th></tr>' +
     t.rows.map((row, r) => `<tr class="${os.has(JSON.stringify(row)) ? '' : 'chg'}">` +
       t.headers.map((h, c) => `<td>${cellInput(ED.sheet, h, row[c] ?? '', r, c)}</td>`).join('') +
