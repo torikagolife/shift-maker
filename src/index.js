@@ -28,6 +28,9 @@ const MONTH_RE = /^\d{4}-\d{2}$/;
 const B64_RE = /^[A-Za-z0-9+/=]+$/;
 const MAX_B64 = 1_500_000; // D1 の1行の上限（約2MB）より小さく
 
+// 保存日時（'2026-11-19 16:08:08'）→ '20261119'
+const ymd8 = updated => String(updated || now()).slice(0, 10).replace(/-/g, '');
+
 function xlsxResponse(b64, filename) {
   const s = atob(b64); const u = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
@@ -81,7 +84,7 @@ async function api(req, env, url) {
     const f = await getFile(env, 'settings');
     if (!f) return fail('設定ファイルがまだありません', 404);
     if (url.searchParams.get('raw')) return json({ b64: f.data });   // 計算エンジン用
-    return xlsxResponse(f.data, '設定.xlsx');
+    return xlsxResponse(f.data, `設定_${ymd8(f.updated)}.xlsx`);
   }
 
   // 予定（希望休など）の書き込み。value が空なら消す
@@ -140,7 +143,7 @@ async function api(req, env, url) {
   if (p === '/api/result' && m === 'GET') {
     const f = await getFile(env, 'result:' + month);
     if (!f) return fail('まだ自動作成していません', 404);
-    return xlsxResponse(f.data, `勤務表_${month}_自動作成.xlsx`);
+    return xlsxResponse(f.data, `勤務表_${month}_自動作成_${ymd8(f.updated)}.xlsx`);
   }
 
   return fail('not found', 404);
