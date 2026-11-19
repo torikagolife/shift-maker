@@ -501,7 +501,7 @@ $('#ckBtn').onclick = async () => {
       JSON.stringify(sp.map(x => ({ date:x.date, target:x.target, min:x.min, max:x.max, note:x.note }))));
     const blob = new Blob([Uint8Array.from(atob(r.xlsx), c => c.charCodeAt(0))], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
-    $('#ckResult').innerHTML = `<p>${r.month.slice(0, 7).replace('-', '年')}月 ／ 違反 <b>${r.violations.length}件</b> <a href="${url}" download="チェック結果_${r.month.slice(0,7)}.xlsx"><button>結果をExcelでダウンロード</button></a></p>` +
+    $('#ckResult').innerHTML = `<p>${r.month.slice(0, 7).replace('-', '年')}月 ／ 違反 <b>${r.violations.length}件</b> <a href="${url}" download="チェック結果_${r.month.slice(0,7)}_${jstToday().toISOString().slice(0,10).replace(/-/g,'')}.xlsx"><button>結果をExcelでダウンロード</button></a></p>` +
       (r.notes.length ? '<p class="err">' + r.notes.map(esc).join('<br>') + '</p>' : '') + vioTable(r.violations) +
       `<p class="muted">シート: ${r.sheets.slice(-12).map(esc).join('、')}${r.sheets.length > 12 ? ' ほか' : ''}</p>`;
     $('#ckMsg').textContent = '';
