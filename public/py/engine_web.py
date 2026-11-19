@@ -94,3 +94,99 @@ def month_of(xlsx_b64, sheet, month):
         return json.dumps(E.month_of(ws, month or None).isoformat()[:7])
     except BaseException:
         return json.dumps('')
+
+
+# ------------------------------------------------------------ 設定をブラウザで編集する
+EDIT_SHEETS = ['基本設定', '勤務種類', '職員', '必要人数', 'ルール', '祝日']
+
+
+def _cell_out(v):
+    """Excel の値 → 画面に出す文字（日付は YYYY-MM-DD、時刻は H:MM）"""
+    import datetime
+    if v is None:
+        return ''
+    if isinstance(v, datetime.datetime):
+        if v.hour == v.minute == 0 and v.year > 1900:
+            return v.date().isoformat()
+        return f'{v.hour}:{v.minute:02d}'
+    if isinstance(v, datetime.date):
+        return v.isoformat()
+    if isinstance(v, datetime.time):
+        return f'{v.hour}:{v.minute:02d}'
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def _cell_in(v, header):
+    """画面の文字 → Excel に書く値（数字は数値、祝日の日付は日付）"""
+    import datetime, re
+    s = str(v if v is not None else '').strip()
+    if s == '':
+        return None
+    if header == '日付':
+        d = E.to_date(s)
+        return datetime.datetime(d.year, d.month, d.day) if d else s
+    if header in ('開始', '終了', 'コード', 'No', '使える勤務', 'タグ', '対象職員', 'グループ'):
+        return int(s) if header == 'No' and re.fullmatch(r'\d+', s) else s
+    if re.fullmatch(r'-?\d+', s):
+        return int(s)
+    if re.fullmatch(r'-?\d+\.\d+', s):
+        return float(s)
+    return s
+
+
+@_out
+def sheets(settings_b64):
+    wb = openpyxl.load_workbook(io.BytesIO(base64.b64decode(settings_b64)))
+    out = {}
+    for name in EDIT_SHEETS:
+        if name not in wb.sheetnames:
+            continue
+        ws = wb[name]
+        rows = [[_cell_out(v) for v in r] for r in ws.iter_rows(values_only=True)]
+        if name == '基本設定':
+            head, body = ['項目', '値'], [r[:2] + [''] * (2 - len(r[:2])) for r in rows if any(r[:2])]
+        else:
+            if not rows:
+                continue
+            head = []
+            for h in rows[0]:          # 見出しは最初の空欄まで（右側のメモ書きは見出しにしない）
+                if not h:
+                    break
+                head.append(h)
+            body = [r[:len(head)] + [''] * (len(head) - len(r[:len(head)])) for r in rows[1:] if any(r[:len(head)])]
+        out[name] = dict(headers=head, rows=body)
+    return out
+
+
+@_out
+def save_sheets(settings_b64, data_json):
+    from openpyxl.styles import PatternFill
+    data = json.loads(data_json)
+    wb = openpyxl.load_workbook(io.BytesIO(base64.b64decode(settings_b64)))
+    for name, t in data.items():
+        if name not in EDIT_SHEETS:
+            continue
+        ws = wb[name] if name in wb.sheetnames else wb.create_sheet(name)
+        head = t['headers']
+        start = 1 if name == '基本設定' else 2
+        if ws.max_row >= start:
+            ws.delete_rows(start, ws.max_row - start + 1)
+        if name != '基本設定' and ws.max_row < 1:
+            ws.append(head)
+        for k, row in enumerate(t['rows']):
+            r = start + k
+            for j, h in enumerate(head):
+                c = ws.cell(r, j + 1, _cell_in(row[j] if j < len(row) else '', h if name != '基本設定' else ''))
+                if h == '日付' and c.value is not None and not isinstance(c.value, str):
+                    c.number_format = 'yyyy/mm/dd'
+                if h == '背景色' and c.value:
+                    col = str(c.value).lstrip('#').upper()
+                    c.value = col
+                    if len(col) == 6:
+                        c.fill = PatternFill('solid', fgColor=col)
+    buf = io.BytesIO()
+    wb.save(buf)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    return dict(b64=b64, info=json.loads(info(b64)))
